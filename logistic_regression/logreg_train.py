@@ -4,6 +4,7 @@ import math
 import sys
 import matplotlib.pyplot as plt
 import os
+import imageio.v2 as imageio
 
 HOUSES = ["Gryffindor", "Hufflepuff", "Ravenclaw", "Slytherin"]
 
@@ -177,6 +178,7 @@ def train_one_vs_all(x_data, y_data, target_house, learning_rate, iterations):
         binary_y.append(1.0 if house == target_house else 0.0)
 
     loss_history = []
+    theta_history = []
 
     for iteration in range(iterations):
         gradients = [0.0] * n
@@ -191,6 +193,8 @@ def train_one_vs_all(x_data, y_data, target_house, learning_rate, iterations):
         for j in range(n):
             gradients[j] /= m
             theta[j] -= learning_rate * gradients[j]
+        
+        theta_history.append(theta[:])
 
         loss = compute_log_loss(x_data, binary_y, theta)
         loss_history.append(loss)
@@ -198,7 +202,7 @@ def train_one_vs_all(x_data, y_data, target_house, learning_rate, iterations):
         if iteration % 500 == 0 or iteration == iterations - 1:
             print(f"[{target_house}] iteration {iteration:5d} | loss = {loss:.6f}")
 
-    return theta, loss_history
+    return theta, loss_history, theta_history
 
 
 # Sauvegarde les paramètres du modèle (caractéristiques, moyennes, écarts-types et poids)
@@ -406,26 +410,6 @@ def plot_confusion_matrix(matrix, output_dir="files"):
 
 
 
-def plot_losses(all_losses, output_dir="files"):
-    os.makedirs(output_dir, exist_ok=True)
-
-    plt.figure(figsize=(10, 6))
-
-    for house, losses in all_losses.items():
-        plt.plot(losses, label=house)
-
-    plt.xlabel("Iterations")
-    plt.ylabel("Log Loss")
-    plt.title("Training Loss per House (One-vs-All)")
-    plt.legend()
-
-    output_path = os.path.join(output_dir, "loss_curves.png")
-    plt.savefig(output_path)
-    plt.close()
-
-    print(f"Loss curves saved to {output_path}")
-
-
 # Sauvegarde les courbes de loss dans des fichiers séparés pour chaque maison
 def save_losses(path, all_losses):
     with open(path, "w", encoding="utf-8") as f:
@@ -433,6 +417,188 @@ def save_losses(path, all_losses):
 
     print(f"Saved: {path}")
 
+
+
+def animate_house_learning(x_data, y_data, theta_history, target_house, output_dir="files"):
+    ensure_output_dir(output_dir)
+
+    frames_dir = os.path.join(output_dir, "frames")
+    snapshots_dir = os.path.join(output_dir, "snapshots")
+
+    ensure_output_dir(frames_dir)
+    ensure_output_dir(snapshots_dir)
+
+    frame_paths = []
+
+    step = max(1, len(theta_history) // 80)
+
+    for frame_idx, theta in enumerate(theta_history[::step]):
+        positive_scores = []
+        negative_scores = []
+
+        for i in range(len(x_data)):
+            z = dot(x_data[i], theta)
+            if y_data[i] == target_house:
+                positive_scores.append(z)
+            else:
+                negative_scores.append(z)
+
+        plt.figure(figsize=(10, 5))
+        plt.hist(negative_scores, bins=30, alpha=0.7, label=f"Not {target_house}")
+        plt.hist(positive_scores, bins=30, alpha=0.7, label=target_house)
+        plt.xlabel("Raw score z = θ·x")
+        plt.ylabel("Number of students")
+        plt.title(f"Learning evolution - {target_house} (frame {frame_idx})")
+        plt.legend()
+        plt.grid(True)
+
+        frame_path = os.path.join(frames_dir, f"{target_house.lower()}_{frame_idx:03d}.png")
+        plt.savefig(frame_path)
+        plt.close()
+
+        frame_paths.append(frame_path)
+
+        # 🔥 Sauvegarde frame 0
+        if frame_idx == 0:
+            first_path = os.path.join(snapshots_dir, f"{target_house.lower()}_start.png")
+            plt.figure(figsize=(10, 5))
+            plt.hist(negative_scores, bins=30, alpha=0.7, label=f"Not {target_house}")
+            plt.hist(positive_scores, bins=30, alpha=0.7, label=target_house)
+            plt.title(f"{target_house} - START")
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(first_path)
+            plt.close()
+
+    # 🔥 Sauvegarde dernière frame
+    last_theta = theta_history[-1]
+
+    positive_scores = []
+    negative_scores = []
+
+    for i in range(len(x_data)):
+        z = dot(x_data[i], last_theta)
+        if y_data[i] == target_house:
+            positive_scores.append(z)
+        else:
+            negative_scores.append(z)
+
+    last_path = os.path.join(snapshots_dir, f"{target_house.lower()}_end.png")
+
+    plt.figure(figsize=(10, 5))
+    plt.hist(negative_scores, bins=30, alpha=0.7, label=f"Not {target_house}")
+    plt.hist(positive_scores, bins=30, alpha=0.7, label=target_house)
+    plt.title(f"{target_house} - END")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(last_path)
+    plt.close()
+
+    # 🎬 GIF
+    gif_path = os.path.join(output_dir, f"learning_{target_house.lower()}.gif")
+
+    images = [imageio.imread(p) for p in frame_paths]
+    imageio.mimsave(gif_path, images, duration=0.15)
+
+    print(f"Saved GIF: {gif_path}")
+    print(f"Saved snapshots: {snapshots_dir}")
+    for path in frame_paths:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+
+def plot_scores_and_probabilities(x_data, y_data, weights, output_dir="files/proba_by_class"):
+    ensure_output_dir(output_dir)
+
+    for house, theta in weights.items():
+        positive_scores = []
+        negative_scores = []
+        positive_probs = []
+        negative_probs = []
+
+        for i in range(len(x_data)):
+            z = dot(x_data[i], theta)
+            p = sigmoid(z)
+
+            if y_data[i] == house:
+                positive_scores.append(z)
+                positive_probs.append(p)
+            else:
+                negative_scores.append(z)
+                negative_probs.append(p)
+
+        plt.figure(figsize=(10, 5))
+        plt.hist(negative_scores, bins=30, alpha=0.7, label=f"Not {house}")
+        plt.hist(positive_scores, bins=30, alpha=0.7, label=house)
+        plt.xlabel("Raw score z = θ·x")
+        plt.ylabel("Number of students")
+        plt.title(f"Score distribution - {house}")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(output_dir, f"scores_{house.lower()}.png"))
+        plt.close()
+
+        plt.figure(figsize=(10, 5))
+        plt.hist(negative_probs, bins=30, alpha=0.7, label=f"Not {house}")
+        plt.hist(positive_probs, bins=30, alpha=0.7, label=house)
+        plt.xlabel("Predicted probability")
+        plt.ylabel("Number of students")
+        plt.title(f"Probability distribution by true class - {house}")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(output_dir, f"prob_by_class_{house.lower()}.png"))
+        plt.close()
+
+
+
+
+def plot_sigmoid_with_students(x_data, y_data, weights, target_house, output_dir="files/sigmoids"):
+    ensure_output_dir(output_dir)
+
+    theta = weights[target_house]
+
+    z_values = []
+    p_values = []
+    colors = []
+
+    for i in range(len(x_data)):
+        z = dot(x_data[i], theta)
+        p = sigmoid(z)
+        z_values.append(z)
+        p_values.append(p)
+
+        if y_data[i] == target_house:
+            colors.append("positive")
+        else:
+            colors.append("negative")
+
+    z_curve = [x / 10.0 for x in range(-100, 101)]
+    p_curve = [sigmoid(z) for z in z_curve]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(z_curve, p_curve, label="Sigmoid")
+
+    pos_x = [z_values[i] for i in range(len(z_values)) if colors[i] == "positive"]
+    pos_y = [p_values[i] for i in range(len(p_values)) if colors[i] == "positive"]
+
+    neg_x = [z_values[i] for i in range(len(z_values)) if colors[i] == "negative"]
+    neg_y = [p_values[i] for i in range(len(p_values)) if colors[i] == "negative"]
+
+    plt.scatter(neg_x, neg_y, alpha=0.5, label=f"Not {target_house}")
+    plt.scatter(pos_x, pos_y, alpha=0.5, label=target_house)
+
+    plt.xlabel("Raw score z = θ·x")
+    plt.ylabel("Probability")
+    plt.title(f"How probabilities are computed - {target_house}")
+    plt.legend()
+    plt.grid(True)
+
+    output_path = os.path.join(output_dir, f"sigmoid_{target_house.lower()}.png")
+    plt.savefig(output_path)
+    plt.close()
+
+    print(f"Saved: {output_path}")
 
 
 # Point d'entrée du programme : lit les données, normalise les caractéristiques,
@@ -460,9 +626,10 @@ def main():
 
     weights = {}
     all_losses = {}
+    all_thetas = {}
 
     for house in HOUSES:
-        theta, loss_history = train_one_vs_all(
+        theta, loss_history, theta_history = train_one_vs_all(
             x_data,
             y_data,
             house,
@@ -471,6 +638,10 @@ def main():
         )
         weights[house] = theta
         all_losses[house] = loss_history
+        all_thetas[house] = theta_history
+
+    for house in HOUSES:
+        animate_house_learning(x_data, y_data, all_thetas[house], house)
 
     train_accuracy = compute_accuracy(x_data, y_data, weights)
     print(f"\nTrain accuracy: {train_accuracy * 100:.2f}%")
@@ -485,8 +656,8 @@ def main():
 
     save_model(MODEL_PATH, FEATURES, means, stds, weights)
     print(f"Model saved to {MODEL_PATH}")
-    plot_losses(all_losses)
     save_losses("files/losses/loss_history.json", all_losses)
+    plot_scores_and_probabilities(x_data, y_data, weights)
 
 
 if __name__ == "__main__":
