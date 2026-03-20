@@ -264,6 +264,148 @@ def compute_accuracy(x_data, y_data, weights):
 
 
 
+# Crée le dossier de sortie s'il n'existe pas
+def ensure_output_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
+# Sauvegarde une image contenant toutes les courbes de loss
+def plot_losses(all_losses, output_dir="files/losses"):
+    ensure_output_dir(output_dir)
+
+    plt.figure(figsize=(10, 6))
+
+    for house, losses in all_losses.items():
+        plt.plot(losses, label=house)
+
+    plt.xlabel("Iterations")
+    plt.ylabel("Log Loss")
+    plt.title("Training Loss per House (One-vs-All)")
+    plt.legend()
+    plt.grid(True)
+
+    output_path = os.path.join(output_dir, "loss_curves_all_houses.png")
+    plt.savefig(output_path)
+    plt.close()
+
+    print(f"Saved: {output_path}")
+
+
+# Sauvegarde une image de loss par maison
+def plot_losses_separate(all_losses, output_dir="files/losses"):
+    ensure_output_dir(output_dir)
+
+    for house, losses in all_losses.items():
+        plt.figure(figsize=(8, 5))
+        plt.plot(losses)
+        plt.xlabel("Iterations")
+        plt.ylabel("Log Loss")
+        plt.title(f"Training Loss - {house}")
+        plt.grid(True)
+
+        safe_house = house.lower().replace(" ", "_")
+        output_path = os.path.join(output_dir, f"loss_{safe_house}.png")
+        plt.savefig(output_path)
+        plt.close()
+
+        print(f"Saved: {output_path}")
+
+
+# Sauvegarde un histogramme des probabilités prédites pour chaque classifieur
+def plot_probability_distributions(x_data, weights, output_dir="files/proba"):
+    ensure_output_dir(output_dir)
+
+    for house, theta in weights.items():
+        probabilities = []
+
+        for x in x_data:
+            prob = predict_probability(x, theta)
+            probabilities.append(prob)
+
+        plt.figure(figsize=(8, 5))
+        plt.hist(probabilities, bins=30)
+        plt.xlabel("Predicted probability")
+        plt.ylabel("Number of students")
+        plt.title(f"Probability Distribution - {house}")
+        plt.grid(True)
+
+        safe_house = house.lower().replace(" ", "_")
+        output_path = os.path.join(output_dir, f"probabilities_{safe_house}.png")
+        plt.savefig(output_path)
+        plt.close()
+
+        print(f"Saved: {output_path}")
+
+
+# Construit une matrice de confusion sous forme de dictionnaire imbriqué
+def compute_confusion_matrix(x_data, y_data, weights):
+    matrix = {}
+
+    for real_house in HOUSES:
+        matrix[real_house] = {}
+        for predicted_house in HOUSES:
+            matrix[real_house][predicted_house] = 0
+
+    for i in range(len(x_data)):
+        real_house = y_data[i]
+        predicted_house = predict_house(x_data[i], weights)
+        matrix[real_house][predicted_house] += 1
+
+    return matrix
+
+
+# Affiche la matrice de confusion dans le terminal
+def print_confusion_matrix(matrix):
+    print("\nConfusion Matrix:")
+    header = "Real \\ Pred".ljust(15)
+
+    for house in HOUSES:
+        header += house[:12].ljust(14)
+    print(header)
+
+    for real_house in HOUSES:
+        row = real_house[:12].ljust(15)
+        for predicted_house in HOUSES:
+            row += str(matrix[real_house][predicted_house]).ljust(14)
+        print(row)
+
+
+# Sauvegarde une version visuelle simple de la matrice de confusion
+def plot_confusion_matrix(matrix, output_dir="files"):
+    ensure_output_dir(output_dir)
+
+    data = []
+    for real_house in HOUSES:
+        row = []
+        for predicted_house in HOUSES:
+            row.append(matrix[real_house][predicted_house])
+        data.append(row)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(data, interpolation="nearest")
+    plt.colorbar()
+
+    plt.xticks(range(len(HOUSES)), HOUSES, rotation=45)
+    plt.yticks(range(len(HOUSES)), HOUSES)
+    plt.xlabel("Predicted House")
+    plt.ylabel("Real House")
+    plt.title("Confusion Matrix")
+
+    for i in range(len(HOUSES)):
+        for j in range(len(HOUSES)):
+            plt.text(j, i, str(data[i][j]), ha="center", va="center")
+
+    plt.tight_layout()
+
+    output_path = os.path.join(output_dir, "confusion_matrix.png")
+    plt.savefig(output_path)
+    plt.close()
+
+    print(f"Saved: {output_path}")
+
+
+
 def plot_losses(all_losses, output_dir="files"):
     os.makedirs(output_dir, exist_ok=True)
 
@@ -282,6 +424,14 @@ def plot_losses(all_losses, output_dir="files"):
     plt.close()
 
     print(f"Loss curves saved to {output_path}")
+
+
+# Sauvegarde les courbes de loss dans des fichiers séparés pour chaque maison
+def save_losses(path, all_losses):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(all_losses, f, indent=4)
+
+    print(f"Saved: {path}")
 
 
 
@@ -325,9 +475,18 @@ def main():
     train_accuracy = compute_accuracy(x_data, y_data, weights)
     print(f"\nTrain accuracy: {train_accuracy * 100:.2f}%")
 
+    plot_losses(all_losses)
+    plot_losses_separate(all_losses)
+    plot_probability_distributions(x_data, weights)
+
+    confusion = compute_confusion_matrix(x_data, y_data, weights)
+    print_confusion_matrix(confusion)
+    plot_confusion_matrix(confusion)
+
     save_model(MODEL_PATH, FEATURES, means, stds, weights)
     print(f"Model saved to {MODEL_PATH}")
     plot_losses(all_losses)
+    save_losses("files/losses/loss_history.json", all_losses)
 
 
 if __name__ == "__main__":
